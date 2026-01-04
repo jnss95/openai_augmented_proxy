@@ -16,6 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Copy project files
 COPY pyproject.toml uv.lock* ./
+COPY README.md ./
 COPY src ./src
 
 # Install dependencies and the package
