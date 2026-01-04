@@ -16,7 +16,7 @@ from .client import get_upstream_client
 from .config import get_settings, Settings
 from .mcp_client import initialize_mcp_client, shutdown_mcp_client, get_mcp_client
 from .models import get_model_registry, reload_model_registry, ModelRegistry
-from .proxy import process_chat_completion, process_chat_completion_stream
+from .proxy import process_chat_completion
 from .schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -216,17 +216,12 @@ async def chat_completions(
 
     try:
         if request.stream:
-            logger.info("Processing as streaming request")
-            return StreamingResponse(
-                process_chat_completion_stream(request, model_config),
-                media_type="text/event-stream",
-            )
-        else:
-            logger.info("Processing as non-streaming request")
-            response = await process_chat_completion(request, model_config)
-            logger.info(f"Response received: finish_reason={response.choices[0].finish_reason if response.choices else 'N/A'}")
-            logger.debug(f"Response content preview: {(response.choices[0].message.content or '')[:100] if response.choices else 'N/A'}...")
-            return response
+            logger.info("Streaming requested but not supported for augmented models, using non-streaming")
+        logger.info("Processing chat completion request")
+        response = await process_chat_completion(request, model_config)
+        logger.info(f"Response received: finish_reason={response.choices[0].finish_reason if response.choices else 'N/A'}")
+        logger.debug(f"Response content preview: {(response.choices[0].message.content or '')[:100] if response.choices else 'N/A'}...")
+        return response
     except Exception as e:
         logger.exception(f"Error processing chat completion: {e}")
         raise HTTPException(status_code=500, detail=str(e))
