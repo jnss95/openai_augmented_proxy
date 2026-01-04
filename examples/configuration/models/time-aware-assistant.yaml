@@ -1,0 +1,49 @@
+# Example model configuration: Time-aware assistant with templates
+#
+# This model demonstrates the system prompt template feature,
+# allowing tools to be called directly in the system prompt.
+
+name: augmented/time-aware-assistant
+upstream_model: gpt-4o-mini
+description: "An assistant that always knows the current time"
+owned_by: openai-proxy
+
+# Use templates in the system prompt - {{tool_name(args)}} syntax
+# Templates are replaced with tool results at request time
+system_prompt: |
+  You are a helpful assistant. 
+  
+  ## Current Context
+  
+  The current date and time is: {{get_current_time(timezone="UTC")}}
+  
+  When discussing time-sensitive matters, use this information to provide
+  accurate responses. You can also use the get_current_time tool for
+  other timezones if needed.
+
+# The get_current_time tool is still available for the model to use
+tools:
+  - type: function
+    function:
+      name: get_current_time
+      description: Get the current date and time
+      parameters:
+        type: object
+        properties:
+          timezone:
+            type: string
+            description: The timezone to get the time in (e.g., 'UTC', 'America/New_York', 'Europe/Berlin')
+        required: []
+
+  - type: function
+    function:
+      name: calculator
+      description: Perform basic mathematical calculations
+      parameters:
+        type: object
+        properties:
+          expression:
+            type: string
+            description: The mathematical expression to evaluate (e.g., '2+2', '10*5')
+        required:
+          - expression

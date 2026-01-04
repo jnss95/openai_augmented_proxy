@@ -18,6 +18,7 @@ from .schemas import (
     ToolFunctionSchema,
 )
 from .skills import get_skills_loader
+from .template_processor import process_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,11 @@ def merge_tools(
 
 
 def build_system_prompt(model_config: ModelConfig) -> str | None:
-    """Build the complete system prompt including skills."""
+    """Build the complete system prompt including skills (without template processing).
+    
+    Note: This returns the raw prompt. Use build_system_prompt_async() to also
+    process templates with tool calls.
+    """
     parts: list[str] = []
 
     # Add configured system prompt
@@ -182,6 +187,21 @@ def build_system_prompt(model_config: ModelConfig) -> str | None:
             parts.append("\n\n# Skills & Capabilities\n\n" + skills_content)
 
     return "\n\n".join(parts) if parts else None
+
+
+async def build_system_prompt_async(model_config: ModelConfig) -> str | None:
+    """Build the complete system prompt including skills and process templates.
+    
+    This function builds the system prompt and processes any tool call templates
+    like {{tool_name(arg="value")}} by executing the tools and replacing with results.
+    """
+    raw_prompt = build_system_prompt(model_config)
+    
+    if raw_prompt:
+        # Process any templates in the prompt
+        return await process_system_prompt(raw_prompt)
+    
+    return raw_prompt
 
 
 def prepend_system_prompt(
@@ -334,8 +354,8 @@ async def process_chat_completion(
     # Get MCP tools for this model
     mcp_tools = await get_mcp_tools_for_model(model_config)
 
-    # Build complete system prompt (including skills)
-    system_prompt = build_system_prompt(model_config)
+    # Build complete system prompt (including skills and template processing)
+    system_prompt = await build_system_prompt_async(model_config)
 
     # Prepare the request for upstream (with per-server tool filtering)
     merged_tools = merge_tools(request.tools, model_config.tools, mcp_tools, model_config)
@@ -442,8 +462,8 @@ async def process_chat_completion_stream(
     if model_config.tools or mcp_tools:
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
         
-        # Prepare request for upstream (with per-server tool filtering)
-        system_prompt = build_system_prompt(model_config)
+        # Prepare request for upstream (with per-server tool filtering and template processing)
+        system_prompt = await build_system_prompt_async(model_config)
         merged_tools = merge_tools(request.tools, model_config.tools, mcp_tools, model_config)
         modified_messages = prepend_system_prompt(request.messages, system_prompt)
         proxy_tool_names = get_proxy_tool_names(model_config, mcp_tools)
@@ -612,8 +632,8 @@ async def process_chat_completion_stream(
     # No proxy tools - stream directly from upstream
     client = get_upstream_client()
 
-    # Build complete system prompt (including skills)
-    system_prompt = build_system_prompt(model_config)
+    # Build complete system prompt (including skills and template processing)
+    system_prompt = await build_system_prompt_async(model_config)
     modified_messages = prepend_system_prompt(request.messages, system_prompt)
 
     modified_request = ChatCompletionRequest(

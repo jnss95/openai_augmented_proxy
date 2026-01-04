@@ -9,6 +9,7 @@ A Python proxy server that augments OpenAI-compatible APIs with additional tools
 - **Tool Augmentation**: Add custom tools to augmented model configurations
 - **MCP Server Integration**: Connect to Model Context Protocol servers (stdio, SSE, Streamable HTTP)
 - **Per-Server Tool Filtering**: Whitelist/blacklist tools from each MCP server
+- **System Prompt Templates**: Call tools in system prompts using `{{tool_name(args)}}` syntax
 - **Skills Support**: Claude Code-style skills that inject capabilities into system prompts
 - **Streaming Tool Status**: Real-time status updates during tool execution (similar to "thinking")
 - **Automatic Tool Handling**: Proxy executes its own tools transparently
@@ -164,6 +165,52 @@ mcp_servers:
       - "*debug*"
       - "*test*"
 ```
+
+### System Prompt Templates
+
+You can call tools directly in the system prompt using template syntax. Templates are processed at request time and replaced with the tool's result:
+
+```yaml
+system_prompt: |
+  You are a helpful assistant.
+  
+  The current time is: {{get_current_time(timezone="UTC")}}
+  
+  Available devices:
+  {{mcp_homeassistant_list_entities(domain="light")}}
+```
+
+**Template Syntax:**
+- `{{tool_name()}}` - Call a tool with no arguments
+- `{{tool_name(arg="value")}}` - Call with string argument
+- `{{tool_name(count=10)}}` - Call with integer argument
+- `{{tool_name(enabled=true)}}` - Call with boolean argument
+
+**Supported Value Types:**
+- Strings: `"value"` or `'value'`
+- Integers: `123`
+- Floats: `12.5`
+- Booleans: `true` or `false`
+- Null: `null`
+
+**Examples:**
+
+```yaml
+# Built-in tool
+system_prompt: |
+  Current time: {{get_current_time()}}
+
+# MCP tool (prefixed with mcp_{server}_)
+system_prompt: |
+  Weather forecast: {{mcp_weather_get_forecast(city="Berlin")}}
+
+# Multiple templates
+system_prompt: |
+  Time: {{get_current_time(timezone="Europe/Berlin")}}
+  Calculator test: {{calculator(expression="2+2")}}
+```
+
+Templates are processed concurrently for better performance.
 
 ### Skills Configuration
 
