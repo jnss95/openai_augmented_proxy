@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .config import get_settings
 
@@ -25,6 +25,25 @@ class ToolFunction(BaseModel):
     name: str
     description: str = ""
     parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}, "required": []})
+
+
+class ExpertConfig(BaseModel):
+    """Configuration for an expert model that can be called."""
+
+    history: str = Field(
+        default="full",
+        description="How to transfer chat history: 'full', 'condensed', or 'off'",
+    )
+
+    @field_validator("history", mode="before")
+    @classmethod
+    def convert_history(cls, v):
+        """Convert boolean values to strings (YAML parses 'off' as False)."""
+        if v is False:
+            return "off"
+        if v is True:
+            return "full"
+        return v
 
 
 class Tool(BaseModel):
@@ -82,6 +101,12 @@ class ModelConfig(BaseModel):
     include_global_skills: bool = Field(
         default=True,
         description="Whether to include global skills in addition to model-specific skills",
+    )
+
+    # Expert models that can be delegated to
+    experts: dict[str, ExpertConfig] = Field(
+        default_factory=dict,
+        description="Expert models that can be called. Keys are model names, values are config.",
     )
 
     # Model metadata for /v1/models endpoint

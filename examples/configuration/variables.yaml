@@ -1,0 +1,38 @@
+# Example Variables Configuration
+#
+# This file contains variables that can be used in Jinja2 templates.
+# Variables are available directly in templates using {{ variable_name }}
+# Nested variables use dot notation: {{ settings.max_tokens }}
+
+# Application metadata
+app_name: "OpenAI Proxy Assistant"
+version: "1.0.0"
+environment: "development"
+
+# Default settings that can be referenced in prompts
+settings:
+  max_tokens: 4096
+  temperature: 0.7
+  default_timezone: "UTC"
+
+# Common prompt snippets
+prompts:
+  safety_reminder: |
+    Remember to be helpful, harmless, and honest in all responses.
+  
+  context_awareness: |
+    Always consider the context of the conversation when responding.
+  
+  tool_guidance: |
+    When using tools, explain what you're doing and why.
+
+# User preferences (can be overridden by other backends)
+user:
+  name: "User"
+  preferred_language: "English"
+
+# Feature flags
+features:
+  debug_mode: false
+  verbose_responses: false
+  include_timestamps: true

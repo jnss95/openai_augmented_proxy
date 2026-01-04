@@ -11,9 +11,14 @@ configuration/
 │   └── researcher.yaml
 ├── mcp/              # MCP server configurations
 │   └── servers.yaml
-└── skills/           # Skills (injected into system prompts)
-    ├── code-review.md
-    └── writing-style.md
+├── skills/           # Skills (injected into system prompts)
+│   ├── code-review.md
+│   └── writing-style.md
+├── templates/        # Jinja2 templates for system prompts
+│   ├── base-assistant.j2
+│   ├── common/
+│   └── context/
+└── variables.yaml    # Variables for use in templates
 ```
 
 ## Usage
@@ -56,3 +61,27 @@ Markdown files that inject instructions into the system prompt:
 - Model-specific: Place in `skills/{model-name}/`
 
 See [skills/](skills/) for examples.
+
+### Templates (`templates/*.j2`)
+
+Jinja2 templates for reusable system prompt components:
+- Include templates with `{% include "template.j2" %}`
+- Call tools with `{{ tool("tool_name", arg="value") }}`
+- Use variables with `{{ variable_name }}`
+- Full Jinja2 features: conditionals, loops, filters, etc.
+
+See [templates/README.md](templates/README.md) for detailed documentation.
+
+### Variables (`variables.yaml`)
+
+YAML file containing variables available in all templates:
+
+```yaml
+app_name: "My Assistant"
+version: "1.0"
+settings:
+  max_tokens: 4096
+  debug_mode: false
+```
+
+Use in templates: `{{ app_name }}` or `{{ settings.max_tokens }}`

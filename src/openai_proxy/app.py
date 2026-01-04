@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from .client import get_upstream_client
 from .config import get_settings, Settings
-from .mcp_client import initialize_mcp_client, shutdown_mcp_client
+from .mcp_client import initialize_mcp_client, shutdown_mcp_client, get_mcp_client
 from .models import get_model_registry, reload_model_registry, ModelRegistry
 from .proxy import process_chat_completion, process_chat_completion_stream
 from .schemas import (
@@ -22,8 +22,12 @@ from .schemas import (
     ChatCompletionResponse,
     ModelListResponse,
     ModelObject,
+    TemplateEvalRequest,
+    TemplateEvalResponse,
 )
 from .skills import get_skills_loader, reload_skills_loader
+from .template_processor import initialize_template_processor, get_template_processor
+from .variable_store import initialize_variable_store, get_variable_store
 
 
 def setup_logging() -> logging.Logger:
@@ -73,6 +77,16 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup: Load model configurations and skills
     logger.info("Starting OpenAI API Proxy...")
+    
+    settings = get_settings()
+    
+    # Initialize variable store
+    await initialize_variable_store(settings.config_dir)
+    logger.info("Variable store initialized")
+    
+    # Initialize template processor
+    initialize_template_processor(settings.templates_dir)
+    logger.info("Template processor initialized")
     
     registry = get_model_registry()
     logger.info(f"Loaded {len(registry.list_models())} models: {[m.name for m in registry.list_models()]}")
@@ -270,3 +284,180 @@ async def reload_config() -> dict:
 async def health() -> dict:
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.post("/admin/template/eval")
+async def eval_template(request: TemplateEvalRequest) -> TemplateEvalResponse:
+    """Evaluate a Jinja2 template and return the result.
+    
+    This endpoint is useful for testing and debugging templates before
+    using them in model configurations.
+    
+    The template can use:
+    - Variables from variables.yaml: {{ app_name }}
+    - Extra variables passed in the request: {{ my_var }}
+    - Tool calls: {{ tool("get_current_time", timezone="UTC") }}
+    - Template includes: {% include "base-assistant.j2" %}
+    - All Jinja2 features: conditionals, loops, filters, etc.
+    """
+    processor = get_template_processor()
+    
+    try:
+        result = await processor.process(
+            request.template,
+            extra_variables=request.variables,
+            raise_on_error=True,
+        )
+        return TemplateEvalResponse(
+            success=True,
+            result=result,
+            error=None,
+        )
+    except Exception as e:
+        logger.exception(f"Template evaluation error: {e}")
+        return TemplateEvalResponse(
+            success=False,
+            result=None,
+            error=str(e),
+        )
+
+
+@app.get("/admin/template/variables")
+async def get_variables() -> dict:
+    """Get all variables available in templates.
+    
+    Returns the merged variables from all configured backends.
+    """
+    store = await get_variable_store()
+    variables = await store.load_all()
+    return {"variables": variables}
+
+
+# MCP Server endpoints
+@app.get("/admin/mcp/servers")
+async def list_mcp_servers() -> dict:
+    """List all configured MCP servers.
+    
+    Returns information about each server including:
+    - name: Server identifier
+    - type: Connection type (stdio, sse, streamablehttp)
+    - description: Server description
+    - connected: Whether the server is currently connected
+    - tools_count: Number of tools available from this server
+    """
+    client = await get_mcp_client()
+    servers = client.get_all_servers_info()
+    return {
+        "servers": servers,
+        "total": len(servers),
+        "connected": len(client.get_connected_servers()),
+    }
+
+
+@app.get("/admin/mcp/servers/{server_name}")
+async def get_mcp_server(server_name: str) -> dict:
+    """Get details for a specific MCP server.
+    
+    Args:
+        server_name: Name of the MCP server
+        
+    Returns:
+        Server information and configuration
+    """
+    client = await get_mcp_client()
+    info = client.get_server_info(server_name)
+    
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"MCP server '{server_name}' not found")
+    
+    return info
+
+
+@app.get("/admin/mcp/servers/{server_name}/tools")
+async def list_mcp_server_tools(server_name: str) -> dict:
+    """List all tools available from a specific MCP server.
+    
+    Args:
+        server_name: Name of the MCP server
+        
+    Returns:
+        List of tools with their names, descriptions, and parameters
+    """
+    client = await get_mcp_client()
+    
+    # Check if server exists
+    if server_name not in client.get_available_servers():
+        raise HTTPException(status_code=404, detail=f"MCP server '{server_name}' not found")
+    
+    # Check if connected
+    if server_name not in client.get_connected_servers():
+        raise HTTPException(
+            status_code=503,
+            detail=f"MCP server '{server_name}' is not connected"
+        )
+    
+    tools = client.get_server_tools(server_name)
+    return {
+        "server": server_name,
+        "tools": tools,
+        "total": len(tools),
+    }
+
+
+@app.get("/admin/mcp/servers/{server_name}/tools/{tool_name}")
+async def get_mcp_tool(server_name: str, tool_name: str) -> dict:
+    """Get details for a specific tool from an MCP server.
+    
+    Args:
+        server_name: Name of the MCP server
+        tool_name: Name of the tool (without mcp_ prefix)
+        
+    Returns:
+        Tool details including parameters schema
+    """
+    client = await get_mcp_client()
+    
+    # Check if server exists and is connected
+    if server_name not in client.get_available_servers():
+        raise HTTPException(status_code=404, detail=f"MCP server '{server_name}' not found")
+    
+    if server_name not in client.get_connected_servers():
+        raise HTTPException(
+            status_code=503,
+            detail=f"MCP server '{server_name}' is not connected"
+        )
+    
+    # Find the tool
+    tools = client.get_server_tools(server_name)
+    for tool in tools:
+        if tool["name"] == tool_name:
+            return tool
+    
+    raise HTTPException(
+        status_code=404,
+        detail=f"Tool '{tool_name}' not found on server '{server_name}'"
+    )
+
+
+@app.get("/admin/mcp/tools")
+async def list_all_mcp_tools() -> dict:
+    """List all tools from all connected MCP servers.
+    
+    Returns:
+        List of all available MCP tools grouped by server
+    """
+    client = await get_mcp_client()
+    
+    result = {}
+    total = 0
+    
+    for server_name in client.get_connected_servers():
+        tools = client.get_server_tools(server_name)
+        result[server_name] = tools
+        total += len(tools)
+    
+    return {
+        "servers": result,
+        "total_tools": total,
+        "connected_servers": len(result),
+    }

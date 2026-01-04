@@ -1,0 +1,8 @@
+{# Base assistant template - provides common structure for assistants #}
+You are {{ app_name | default("a helpful assistant") }}.
+
+{{ prompts.safety_reminder | default("") }}
+
+{% if features.include_timestamps %}
+Current session started at: {{ tool("get_current_time", timezone=settings.default_timezone | default("UTC")) }}
+{% endif %}

@@ -6,9 +6,16 @@ from typing import Any
 
 from .chat_logger import get_chat_logger
 from .client import get_upstream_client
+from .experts import (
+    EXPERT_TOOL_NAME,
+    build_experts_system_prompt_section,
+    execute_expert_call,
+    get_expert_tool_schema,
+    prepare_history_for_expert,
+)
 from .handlers import get_handler
 from .mcp_client import get_mcp_client, MCPTool
-from .models import ModelConfig, Tool
+from .models import ModelConfig, Tool, get_model_registry
 from .schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -56,6 +63,10 @@ def get_proxy_tool_names(
 ) -> set[str]:
     """Get the names of tools managed by the proxy for this model (after filtering)."""
     names = {tool.function.name for tool in model_config.tools}
+    
+    # Add expert tool if experts are configured
+    if model_config.experts:
+        names.add(EXPERT_TOOL_NAME)
     
     # Add MCP tool names with per-server filtering
     for tool in mcp_tools:
@@ -118,6 +129,18 @@ def merge_tools(
     """
     merged: dict[str, ToolSchema] = {}
 
+    # Add expert tool if experts are configured
+    if model_config.experts:
+        expert_schema = get_expert_tool_schema()
+        merged[EXPERT_TOOL_NAME] = ToolSchema(
+            type="function",
+            function=ToolFunctionSchema(
+                name=expert_schema["function"]["name"],
+                description=expert_schema["function"]["description"],
+                parameters=expert_schema["function"]["parameters"],
+            ),
+        )
+
     # Add proxy tools first (no filtering on built-in tools)
     for tool in proxy_tools:
         schema = ToolSchema(
@@ -173,6 +196,16 @@ def build_system_prompt(model_config: ModelConfig) -> str | None:
     if model_config.system_prompt:
         parts.append(model_config.system_prompt)
 
+    # Add experts section if experts are configured
+    if model_config.experts:
+        model_registry = get_model_registry()
+        experts_section = build_experts_system_prompt_section(
+            model_config.experts,
+            model_registry,
+        )
+        if experts_section:
+            parts.append(experts_section)
+
     # Add skills
     skills_loader = get_skills_loader()
     skills = skills_loader.get_skills_for_model(
@@ -190,10 +223,10 @@ def build_system_prompt(model_config: ModelConfig) -> str | None:
 
 
 async def build_system_prompt_async(model_config: ModelConfig) -> str | None:
-    """Build the complete system prompt including skills and process templates.
+    """Build the complete system prompt including skills and process Jinja2 templates.
     
-    This function builds the system prompt and processes any tool call templates
-    like {{tool_name(arg="value")}} by executing the tools and replacing with results.
+    This function builds the system prompt and processes Jinja2 templates including
+    tool calls like {{ tool("name", arg="value") }}, includes, and variables.
     """
     raw_prompt = build_system_prompt(model_config)
     
@@ -227,9 +260,42 @@ async def execute_proxy_tool(
     tool_name: str,
     arguments: dict[str, Any],
     conversation_id: str | None = None,
+    model_config: ModelConfig | None = None,
+    original_messages: list[Message] | None = None,
 ) -> str:
     """Execute a proxy-managed tool and return the result."""
     chat_logger = get_chat_logger()
+    
+    # Check if this is an expert call
+    if tool_name == EXPERT_TOOL_NAME:
+        expert_name = arguments.get("expert_model", "")
+        prompt = arguments.get("prompt", "")
+        chat_history = arguments.get("chat_history")
+        
+        # If chat_history not provided in arguments but we have original messages,
+        # prepare history based on the expert's configured history mode
+        if chat_history is None and model_config and original_messages:
+            expert_config = model_config.experts.get(expert_name)
+            if expert_config:
+                chat_history = prepare_history_for_expert(
+                    original_messages,
+                    expert_config.history,
+                )
+        
+        model_registry = get_model_registry()
+        result_str = await execute_expert_call(
+            expert_name=expert_name,
+            prompt=prompt,
+            chat_history=chat_history,
+            model_registry=model_registry,
+            process_chat_completion_func=process_chat_completion,
+        )
+        
+        # Log the tool call
+        if conversation_id:
+            chat_logger.log_tool_call(conversation_id, tool_name, arguments, result_str)
+        
+        return result_str
     
     # Check if this is an MCP tool
     if tool_name.startswith("mcp_"):
@@ -302,7 +368,13 @@ async def handle_tool_calls(
         except json.JSONDecodeError:
             arguments = {}
 
-        result = await execute_proxy_tool(tool_call.function.name, arguments, conversation_id)
+        result = await execute_proxy_tool(
+            tool_call.function.name,
+            arguments,
+            conversation_id,
+            model_config=model_config,
+            original_messages=original_request.messages,
+        )
         tool_results.append(
             Message(
                 role="tool",
@@ -459,7 +531,7 @@ async def process_chat_completion_stream(
         return f"data: {json.dumps(data)}\n\n"
 
     # --- Handle tools with streaming status ---
-    if model_config.tools or mcp_tools:
+    if model_config.tools or mcp_tools or model_config.experts:
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
         
         # Prepare request for upstream (with per-server tool filtering and template processing)
@@ -581,7 +653,13 @@ async def process_chat_completion_stream(
                 except json.JSONDecodeError:
                     arguments = {}
                 
-                result = await execute_proxy_tool(tool_name, arguments, conversation_id)
+                result = await execute_proxy_tool(
+                    tool_name,
+                    arguments,
+                    conversation_id,
+                    model_config=model_config,
+                    original_messages=request.messages,
+                )
                 tool_results.append(
                     Message(
                         role="tool",

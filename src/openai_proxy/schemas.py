@@ -136,3 +136,22 @@ class ModelListResponse(BaseModel):
 
     object: str = "list"
     data: list[ModelObject]
+
+
+# Template evaluation schemas
+class TemplateEvalRequest(BaseModel):
+    """Request for template evaluation."""
+
+    template: str = Field(..., description="The Jinja2 template string to evaluate")
+    variables: dict[str, Any] | None = Field(
+        default=None,
+        description="Extra variables to make available in the template (merged with variables.yaml)",
+    )
+
+
+class TemplateEvalResponse(BaseModel):
+    """Response from template evaluation."""
+
+    success: bool = Field(..., description="Whether the template was evaluated successfully")
+    result: str | None = Field(default=None, description="The rendered template result")
+    error: str | None = Field(default=None, description="Error message if evaluation failed")

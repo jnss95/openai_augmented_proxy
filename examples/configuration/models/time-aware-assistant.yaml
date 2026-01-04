@@ -1,21 +1,27 @@
-# Example model configuration: Time-aware assistant with templates
+# Example model configuration: Time-aware assistant with Jinja2 templates
 #
-# This model demonstrates the system prompt template feature,
-# allowing tools to be called directly in the system prompt.
+# This model demonstrates the Jinja2 template feature, allowing:
+# - Tool calls directly in the system prompt using {{ tool("name", arg="value") }}
+# - Including reusable templates with {% include "template.j2" %}
+# - Using variables from variables.yaml with {{ variable_name }}
+# - Full Jinja2 features: conditionals, loops, filters, etc.
 
 name: augmented/time-aware-assistant
 upstream_model: gpt-4o-mini
 description: "An assistant that always knows the current time"
 owned_by: openai-proxy
 
-# Use templates in the system prompt - {{tool_name(args)}} syntax
-# Templates are replaced with tool results at request time
+# Jinja2 template syntax for system prompts
+# - {{ tool("tool_name", arg="value") }} calls a tool and inserts the result
+# - {{ variable }} inserts a variable from variables.yaml
+# - {% include "template.j2" %} includes a template file
+# - {% if condition %}...{% endif %} for conditionals
 system_prompt: |
-  You are a helpful assistant. 
+  {% include "base-assistant.j2" %}
   
   ## Current Context
   
-  The current date and time is: {{get_current_time(timezone="UTC")}}
+  {% include "context/time.j2" %}
   
   When discussing time-sensitive matters, use this information to provide
   accurate responses. You can also use the get_current_time tool for

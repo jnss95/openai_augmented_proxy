@@ -329,6 +329,70 @@ class MCPClient:
         """Get list of connected server names."""
         return list(self._connections.keys())
 
+    def get_server_info(self, name: str) -> dict[str, Any] | None:
+        """Get detailed information about a server.
+        
+        Args:
+            name: Server name
+            
+        Returns:
+            Server info dict or None if not found
+        """
+        config = self._server_configs.get(name)
+        if config is None:
+            return None
+
+        connection = self._connections.get(name)
+        tools = list(connection.tools.values()) if connection else []
+
+        return {
+            "name": name,
+            "type": config.type,
+            "description": config.description,
+            "connected": name in self._connections,
+            "tools_count": len(tools),
+            "config": {
+                "command": config.command,
+                "args": config.args,
+                "url": config.url,
+            },
+        }
+
+    def get_all_servers_info(self) -> list[dict[str, Any]]:
+        """Get information about all configured servers.
+        
+        Returns:
+            List of server info dicts
+        """
+        return [
+            self.get_server_info(name)
+            for name in self._server_configs
+            if self.get_server_info(name) is not None
+        ]
+
+    def get_server_tools(self, name: str) -> list[dict[str, Any]]:
+        """Get all tools for a specific server.
+        
+        Args:
+            name: Server name
+            
+        Returns:
+            List of tool info dicts
+        """
+        connection = self._connections.get(name)
+        if connection is None:
+            return []
+
+        return [
+            {
+                "name": tool.name,
+                "full_name": full_name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
+            }
+            for full_name, tool in connection.tools.items()
+        ]
+
 
 # Global MCP client instance
 _mcp_client: MCPClient | None = None

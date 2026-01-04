@@ -1,0 +1,11 @@
+{# Time context template - adds current time information #}
+## Current Time Context
+
+The current date and time is: {{ tool("get_current_time", timezone=timezone | default("UTC")) }}
+
+{% if additional_timezones is defined %}
+Other timezones:
+{% for tz in additional_timezones %}
+- {{ tz }}: {{ tool("get_current_time", timezone=tz) }}
+{% endfor %}
+{% endif %}

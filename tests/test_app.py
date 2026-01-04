@@ -417,3 +417,294 @@ class TestResponseFormat:
         
         data = response.json()
         assert data["object"] == "chat.completion"
+
+
+class TestTemplateEvalEndpoint:
+    """Tests for template evaluation endpoint."""
+
+    def test_eval_simple_template(self, client):
+        """Test evaluating a simple template."""
+        response = client.post(
+            "/admin/template/eval",
+            json={
+                "template": "Hello {{ name }}!",
+                "variables": {"name": "World"},
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["success"] is True
+        assert data["result"] == "Hello World!"
+        assert data["error"] is None
+
+    def test_eval_template_with_tool_call(self, client):
+        """Test evaluating a template with tool call."""
+        response = client.post(
+            "/admin/template/eval",
+            json={
+                "template": '{{ tool("calculator", expression="2+2") }}',
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["success"] is True
+        assert "4" in data["result"]  # Calculator returns {"result": 4, ...}
+
+    def test_eval_template_with_conditionals(self, client):
+        """Test evaluating a template with conditionals."""
+        response = client.post(
+            "/admin/template/eval",
+            json={
+                "template": "{% if debug %}Debug ON{% else %}Debug OFF{% endif %}",
+                "variables": {"debug": True},
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["success"] is True
+        assert data["result"] == "Debug ON"
+
+    def test_eval_template_with_loop(self, client):
+        """Test evaluating a template with loops."""
+        response = client.post(
+            "/admin/template/eval",
+            json={
+                "template": "{% for i in items %}{{ i }} {% endfor %}",
+                "variables": {"items": ["a", "b", "c"]},
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["success"] is True
+        assert "a" in data["result"]
+        assert "b" in data["result"]
+        assert "c" in data["result"]
+
+    def test_eval_invalid_template(self, client):
+        """Test evaluating an invalid template returns error."""
+        response = client.post(
+            "/admin/template/eval",
+            json={
+                "template": "{% if unclosed",
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["success"] is False
+        assert data["result"] is None
+        assert data["error"] is not None
+
+    def test_get_variables(self, client):
+        """Test getting available variables."""
+        response = client.get("/admin/template/variables")
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert "variables" in data
+        assert isinstance(data["variables"], dict)
+
+
+class TestMCPEndpoints:
+    """Tests for MCP server endpoints."""
+
+    @pytest.fixture
+    def mcp_client_with_servers(self, test_config_dir, mock_upstream_client):
+        """Create a test client with mocked MCP servers."""
+        # Reset global state
+        import openai_proxy.config as config_module
+        import openai_proxy.models as models_module
+        import openai_proxy.skills as skills_module
+        import openai_proxy.client as client_module
+        import openai_proxy.chat_logger as chat_logger_module
+        import openai_proxy.mcp_client as mcp_client_module
+        
+        config_module.get_settings.cache_clear()
+        models_module._registry = None
+        skills_module._skills_loader = None
+        client_module._client = None
+        chat_logger_module._chat_logger = None
+        mcp_client_module._mcp_client = None
+        
+        from openai_proxy.config import Settings
+        mock_settings = Settings(
+            base_url="https://api.test.com/v1",
+            api_key="test-api-key",
+            config_dir=str(test_config_dir),
+        )
+        
+        from openai_proxy.models import ModelRegistry
+        registry = ModelRegistry()
+        registry.load_from_directory(test_config_dir / "models")
+        models_module._registry = registry
+        
+        # Create a mock MCP client with servers
+        mock_mcp = MagicMock()
+        mock_mcp.get_available_servers.return_value = ["test-server", "another-server"]
+        mock_mcp.get_connected_servers.return_value = ["test-server"]
+        mock_mcp.get_tools.return_value = []
+        
+        # Mock server info
+        mock_mcp.get_all_servers_info.return_value = [
+            {
+                "name": "test-server",
+                "type": "stdio",
+                "description": "Test MCP server",
+                "connected": True,
+                "tools_count": 2,
+                "config": {"command": "test-cmd", "args": [], "url": None},
+            },
+            {
+                "name": "another-server",
+                "type": "sse",
+                "description": "Another server",
+                "connected": False,
+                "tools_count": 0,
+                "config": {"command": None, "args": [], "url": "http://example.com"},
+            },
+        ]
+        
+        mock_mcp.get_server_info.side_effect = lambda name: {
+            "test-server": {
+                "name": "test-server",
+                "type": "stdio",
+                "description": "Test MCP server",
+                "connected": True,
+                "tools_count": 2,
+                "config": {"command": "test-cmd", "args": [], "url": None},
+            },
+            "another-server": {
+                "name": "another-server",
+                "type": "sse",
+                "description": "Another server",
+                "connected": False,
+                "tools_count": 0,
+                "config": {"command": None, "args": [], "url": "http://example.com"},
+            },
+        }.get(name)
+        
+        mock_mcp.get_server_tools.side_effect = lambda name: {
+            "test-server": [
+                {
+                    "name": "test_tool",
+                    "full_name": "mcp_test-server_test_tool",
+                    "description": "A test tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "arg1": {"type": "string", "description": "First argument"},
+                        },
+                        "required": ["arg1"],
+                    },
+                },
+                {
+                    "name": "another_tool",
+                    "full_name": "mcp_test-server_another_tool",
+                    "description": "Another tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            ],
+            "another-server": [],
+        }.get(name, [])
+        
+        with patch.object(config_module, "get_settings", return_value=mock_settings):
+            with patch("openai_proxy.client.get_upstream_client", return_value=mock_upstream_client):
+                with patch("openai_proxy.proxy.get_upstream_client", return_value=mock_upstream_client):
+                    with patch("openai_proxy.mcp_client.get_mcp_client", return_value=mock_mcp):
+                        with patch("openai_proxy.app.get_mcp_client", return_value=mock_mcp):
+                            with patch("openai_proxy.mcp_client.initialize_mcp_client", return_value=mock_mcp):
+                                with patch("openai_proxy.mcp_client.shutdown_mcp_client", return_value=None):
+                                    with patch("openai_proxy.proxy.get_mcp_tools_for_model", return_value=[]):
+                                        from openai_proxy.app import app
+                                        yield TestClient(app, raise_server_exceptions=False)
+
+    def test_list_mcp_servers(self, mcp_client_with_servers):
+        """Test listing all MCP servers."""
+        response = mcp_client_with_servers.get("/admin/mcp/servers")
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert "servers" in data
+        assert "total" in data
+        assert "connected" in data
+        assert data["total"] == 2
+        assert data["connected"] == 1
+
+    def test_get_mcp_server(self, mcp_client_with_servers):
+        """Test getting a specific MCP server."""
+        response = mcp_client_with_servers.get("/admin/mcp/servers/test-server")
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["name"] == "test-server"
+        assert data["type"] == "stdio"
+        assert data["connected"] is True
+
+    def test_get_nonexistent_mcp_server(self, mcp_client_with_servers):
+        """Test getting a nonexistent MCP server."""
+        response = mcp_client_with_servers.get("/admin/mcp/servers/nonexistent")
+        
+        assert response.status_code == 404
+
+    def test_list_mcp_server_tools(self, mcp_client_with_servers):
+        """Test listing tools for a specific MCP server."""
+        response = mcp_client_with_servers.get("/admin/mcp/servers/test-server/tools")
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["server"] == "test-server"
+        assert "tools" in data
+        assert data["total"] == 2
+        
+        tool_names = [t["name"] for t in data["tools"]]
+        assert "test_tool" in tool_names
+        assert "another_tool" in tool_names
+
+    def test_list_tools_disconnected_server(self, mcp_client_with_servers):
+        """Test listing tools for a disconnected server."""
+        response = mcp_client_with_servers.get("/admin/mcp/servers/another-server/tools")
+        
+        assert response.status_code == 503
+
+    def test_get_mcp_tool(self, mcp_client_with_servers):
+        """Test getting a specific tool."""
+        response = mcp_client_with_servers.get("/admin/mcp/servers/test-server/tools/test_tool")
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["name"] == "test_tool"
+        assert data["description"] == "A test tool"
+        assert "parameters" in data
+
+    def test_get_nonexistent_tool(self, mcp_client_with_servers):
+        """Test getting a nonexistent tool."""
+        response = mcp_client_with_servers.get("/admin/mcp/servers/test-server/tools/nonexistent")
+        
+        assert response.status_code == 404
+
+    def test_list_all_mcp_tools(self, mcp_client_with_servers):
+        """Test listing all MCP tools."""
+        response = mcp_client_with_servers.get("/admin/mcp/tools")
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert "servers" in data
+        assert "total_tools" in data
+        assert "connected_servers" in data
+        assert data["total_tools"] == 2
+        assert "test-server" in data["servers"]

@@ -1,214 +1,46 @@
-"""Tests for template_processor.py - Template processing for system prompts."""
+"""Tests for template_processor.py - Jinja2-based template processing."""
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from openai_proxy.template_processor import (
-    TEMPLATE_PATTERN,
+    TemplateProcessor,
+    ToolCallExtension,
     call_tool,
-    find_templates,
-    parse_arguments,
+    get_template_processor,
+    initialize_template_processor,
     process_system_prompt,
-    process_template,
 )
+from openai_proxy.variable_store import VariableStore, YamlVariableBackend, set_variable_store
 
 
-class TestParseArguments:
-    """Tests for parse_arguments function."""
+class TestToolCallExtension:
+    """Tests for ToolCallExtension class."""
 
-    def test_empty_string(self):
-        """Test parsing empty string."""
-        result = parse_arguments("")
-        assert result == {}
-
-    def test_whitespace_only(self):
-        """Test parsing whitespace only."""
-        result = parse_arguments("   ")
-        assert result == {}
-
-    def test_single_string_double_quotes(self):
-        """Test parsing single string argument with double quotes."""
-        result = parse_arguments('timezone="UTC"')
-        assert result == {"timezone": "UTC"}
-
-    def test_single_string_single_quotes(self):
-        """Test parsing single string argument with single quotes."""
-        result = parse_arguments("timezone='UTC'")
-        assert result == {"timezone": "UTC"}
-
-    def test_integer_value(self):
-        """Test parsing integer value."""
-        result = parse_arguments("count=42")
-        assert result == {"count": 42}
-        assert isinstance(result["count"], int)
-
-    def test_float_value(self):
-        """Test parsing float value."""
-        result = parse_arguments("temperature=0.7")
-        assert result == {"temperature": 0.7}
-        assert isinstance(result["temperature"], float)
-
-    def test_boolean_true(self):
-        """Test parsing boolean true."""
-        result = parse_arguments("enabled=true")
-        assert result == {"enabled": True}
-        assert isinstance(result["enabled"], bool)
-
-    def test_boolean_false(self):
-        """Test parsing boolean false."""
-        result = parse_arguments("enabled=false")
-        assert result == {"enabled": False}
-
-    def test_null_value(self):
-        """Test parsing null value."""
-        result = parse_arguments("value=null")
-        assert result == {"value": None}
-
-    def test_multiple_arguments(self):
-        """Test parsing multiple arguments."""
-        result = parse_arguments('name="test", count=5, enabled=true')
+    def test_create_placeholder(self):
+        """Test creating placeholders for tool calls."""
+        ext = ToolCallExtension()
         
-        assert result == {
-            "name": "test",
-            "count": 5,
-            "enabled": True,
-        }
-
-    def test_arguments_with_spaces(self):
-        """Test parsing arguments with spaces."""
-        result = parse_arguments('  name = "test" ,  count = 10  ')
+        placeholder1 = ext.create_placeholder("tool1", {"arg": "value"})
+        placeholder2 = ext.create_placeholder("tool2", {})
         
-        assert result["name"] == "test"
-        assert result["count"] == 10
+        assert placeholder1 != placeholder2
+        assert "__TOOL_PLACEHOLDER_" in placeholder1
+        assert "__TOOL_PLACEHOLDER_" in placeholder2
 
-    def test_string_with_spaces(self):
-        """Test parsing string value with spaces."""
-        result = parse_arguments('message="Hello World"')
-        assert result == {"message": "Hello World"}
-
-    def test_empty_string_value(self):
-        """Test parsing empty string value."""
-        result = parse_arguments('value=""')
-        assert result == {"value": ""}
-
-
-class TestTemplatePattern:
-    """Tests for the TEMPLATE_PATTERN regex."""
-
-    def test_simple_template_no_args(self):
-        """Test matching simple template with no arguments."""
-        match = TEMPLATE_PATTERN.search("{{get_time()}}")
+    def test_pending_calls_tracked(self):
+        """Test that pending calls are tracked."""
+        ext = ToolCallExtension()
         
-        assert match is not None
-        assert match.group(1) == "get_time"
-        assert match.group(2) == ""
-
-    def test_template_with_args(self):
-        """Test matching template with arguments."""
-        match = TEMPLATE_PATTERN.search('{{get_time(timezone="UTC")}}')
+        ext.create_placeholder("tool1", {"arg": "value"})
+        ext.create_placeholder("tool2", {"x": 1})
         
-        assert match is not None
-        assert match.group(1) == "get_time"
-        assert match.group(2) == 'timezone="UTC"'
-
-    def test_template_with_spaces(self):
-        """Test matching template with whitespace."""
-        match = TEMPLATE_PATTERN.search('{{ get_time( timezone="UTC" ) }}')
-        
-        assert match is not None
-        assert match.group(1) == "get_time"
-
-    def test_template_in_text(self):
-        """Test finding template within text."""
-        text = "The current time is: {{get_time()}}. Have a nice day!"
-        match = TEMPLATE_PATTERN.search(text)
-        
-        assert match is not None
-        assert match.group(1) == "get_time"
-
-    def test_multiple_templates(self):
-        """Test finding multiple templates."""
-        text = "Time: {{get_time()}} Calc: {{calculator(expression='2+2')}}"
-        matches = list(TEMPLATE_PATTERN.finditer(text))
-        
-        assert len(matches) == 2
-        assert matches[0].group(1) == "get_time"
-        assert matches[1].group(1) == "calculator"
-
-    def test_no_template(self):
-        """Test text without templates."""
-        text = "This is plain text without templates."
-        match = TEMPLATE_PATTERN.search(text)
-        
-        assert match is None
-
-    def test_mcp_tool_template(self):
-        """Test matching MCP tool template."""
-        match = TEMPLATE_PATTERN.search('{{mcp_server_tool_name()}}')
-        
-        assert match is not None
-        assert match.group(1) == "mcp_server_tool_name"
-
-
-class TestFindTemplates:
-    """Tests for find_templates function."""
-
-    def test_find_no_templates(self):
-        """Test finding no templates in plain text."""
-        templates = find_templates("Plain text without templates")
-        assert templates == []
-
-    def test_find_templates_empty_string(self):
-        """Test with empty string."""
-        templates = find_templates("")
-        assert templates == []
-
-    def test_find_templates_none(self):
-        """Test with None."""
-        templates = find_templates(None)
-        assert templates == []
-
-    def test_find_single_template(self):
-        """Test finding a single template."""
-        templates = find_templates("Time: {{get_time()}}")
-        
-        assert len(templates) == 1
-        assert templates[0]["tool_name"] == "get_time"
-        assert templates[0]["arguments"] == {}
-
-    def test_find_template_with_args(self):
-        """Test finding template with arguments."""
-        templates = find_templates('{{get_time(timezone="UTC")}}')
-        
-        assert len(templates) == 1
-        assert templates[0]["tool_name"] == "get_time"
-        assert templates[0]["arguments"] == {"timezone": "UTC"}
-
-    def test_find_multiple_templates(self):
-        """Test finding multiple templates."""
-        prompt = """
-        Current time: {{get_time()}}
-        Calculation: {{calculator(expression="2+2")}}
-        """
-        templates = find_templates(prompt)
-        
-        assert len(templates) == 2
-        
-        names = [t["tool_name"] for t in templates]
-        assert "get_time" in names
-        assert "calculator" in names
-
-    def test_find_templates_returns_positions(self):
-        """Test that find_templates returns positions."""
-        templates = find_templates("Start {{get_time()}} End")
-        
-        assert len(templates) == 1
-        assert "start" in templates[0]
-        assert "end" in templates[0]
-        assert templates[0]["start"] > 0
-        assert templates[0]["end"] > templates[0]["start"]
+        assert len(ext.pending_calls) == 2
+        assert ext.pending_calls[0][0] == "tool1"
+        assert ext.pending_calls[1][0] == "tool2"
 
 
 class TestCallTool:
@@ -253,78 +85,236 @@ class TestCallTool:
         mock_mcp_client.call_tool.assert_called_once()
 
 
-class TestProcessTemplate:
-    """Tests for process_template function."""
+class TestTemplateProcessor:
+    """Tests for TemplateProcessor class."""
+
+    @pytest.fixture
+    def empty_store(self):
+        """Create an empty variable store."""
+        store = VariableStore()
+        set_variable_store(store)
+        return store
+
+    @pytest.fixture
+    def store_with_vars(self, tmp_path):
+        """Create a variable store with some variables."""
+        vars_file = tmp_path / "variables.yaml"
+        vars_file.write_text("""
+app_name: "Test App"
+version: "1.0"
+settings:
+  max_tokens: 100
+  debug: true
+items:
+  - apple
+  - banana
+  - cherry
+""")
+        store = VariableStore()
+        store.add_backend(YamlVariableBackend(vars_file))
+        set_variable_store(store)
+        return store
 
     @pytest.mark.asyncio
-    async def test_process_simple_template(self):
-        """Test processing a simple template."""
-        result = await process_template("get_current_time()")
+    async def test_process_plain_text(self, empty_store):
+        """Test processing plain text without templates."""
+        processor = TemplateProcessor()
+        result = await processor.process("Hello, world!")
         
-        # Should return valid JSON from the handler
-        data = json.loads(result)
-        assert "time" in data
+        assert result == "Hello, world!"
 
     @pytest.mark.asyncio
-    async def test_process_template_with_args(self):
-        """Test processing template with arguments."""
-        result = await process_template('calculator(expression="3*4")')
+    async def test_process_with_variable(self, store_with_vars):
+        """Test processing template with variables."""
+        processor = TemplateProcessor()
+        result = await processor.process("App: {{ app_name }}")
+        
+        assert result == "App: Test App"
+
+    @pytest.mark.asyncio
+    async def test_process_nested_variable(self, store_with_vars):
+        """Test processing template with nested variables."""
+        processor = TemplateProcessor()
+        result = await processor.process("Tokens: {{ settings.max_tokens }}")
+        
+        assert result == "Tokens: 100"
+
+    @pytest.mark.asyncio
+    async def test_process_with_conditional(self, store_with_vars):
+        """Test processing template with conditionals."""
+        processor = TemplateProcessor()
+        template = "{% if settings.debug %}Debug ON{% else %}Debug OFF{% endif %}"
+        result = await processor.process(template)
+        
+        assert result == "Debug ON"
+
+    @pytest.mark.asyncio
+    async def test_process_with_loop(self, store_with_vars):
+        """Test processing template with loops."""
+        processor = TemplateProcessor()
+        template = "{% for item in items %}{{ item }} {% endfor %}"
+        result = await processor.process(template)
+        
+        assert "apple" in result
+        assert "banana" in result
+        assert "cherry" in result
+
+    @pytest.mark.asyncio
+    async def test_process_with_filter(self, store_with_vars):
+        """Test processing template with filters."""
+        processor = TemplateProcessor()
+        result = await processor.process("{{ app_name | upper }}")
+        
+        assert result == "TEST APP"
+
+    @pytest.mark.asyncio
+    async def test_process_with_default_filter(self, empty_store):
+        """Test processing template with default filter for missing var."""
+        processor = TemplateProcessor()
+        result = await processor.process("{{ missing | default('fallback') }}")
+        
+        assert result == "fallback"
+
+    @pytest.mark.asyncio
+    async def test_process_with_tool_call(self, empty_store):
+        """Test processing template with tool call."""
+        processor = TemplateProcessor()
+        result = await processor.process('Time: {{ tool("get_current_time") }}')
+        
+        # Should contain the tool result (JSON with time)
+        assert "time" in result
+        assert "timezone" in result
+
+    @pytest.mark.asyncio
+    async def test_process_with_tool_call_args(self, empty_store):
+        """Test processing template with tool call with arguments."""
+        processor = TemplateProcessor()
+        result = await processor.process('{{ tool("calculator", expression="3*4") }}')
         
         data = json.loads(result)
         assert data["result"] == 12
 
     @pytest.mark.asyncio
-    async def test_process_invalid_template(self):
-        """Test processing invalid template."""
-        # Invalid template format
-        result = await process_template("not a valid template")
+    async def test_process_multiple_tool_calls(self, empty_store):
+        """Test processing template with multiple tool calls."""
+        processor = TemplateProcessor()
+        template = '{{ tool("calculator", expression="1+1") }} and {{ tool("calculator", expression="2+2") }}'
+        result = await processor.process(template)
         
-        assert "[Invalid template:" in result
+        # Both results should be present
+        assert "2" in result  # 1+1
+        assert "4" in result  # 2+2
+
+    @pytest.mark.asyncio
+    async def test_process_with_extra_variables(self, empty_store):
+        """Test processing template with extra variables."""
+        processor = TemplateProcessor()
+        result = await processor.process(
+            "Hello, {{ name }}!",
+            extra_variables={"name": "World"}
+        )
+        
+        assert result == "Hello, World!"
+
+    @pytest.mark.asyncio
+    async def test_process_extra_vars_override_store(self, store_with_vars):
+        """Test that extra variables override store variables."""
+        processor = TemplateProcessor()
+        result = await processor.process(
+            "{{ app_name }}",
+            extra_variables={"app_name": "Override App"}
+        )
+        
+        assert result == "Override App"
+
+
+class TestTemplateProcessorWithFiles:
+    """Tests for TemplateProcessor with template files."""
+
+    @pytest.fixture
+    def templates_dir(self, tmp_path):
+        """Create a templates directory with test templates."""
+        tpl_dir = tmp_path / "templates"
+        tpl_dir.mkdir()
+        
+        # Create a simple template
+        (tpl_dir / "simple.j2").write_text("Simple template content")
+        
+        # Create a template with variables
+        (tpl_dir / "with-vars.j2").write_text("App: {{ app_name }}")
+        
+        # Create a template that includes another
+        (tpl_dir / "parent.j2").write_text('{% include "simple.j2" %} - Extended')
+        
+        # Create subdirectory
+        (tpl_dir / "common").mkdir()
+        (tpl_dir / "common" / "header.j2").write_text("=== HEADER ===")
+        
+        return tpl_dir
+
+    @pytest.fixture
+    def store_with_vars(self, tmp_path):
+        """Create a variable store with some variables."""
+        vars_file = tmp_path / "variables.yaml"
+        vars_file.write_text("app_name: Test App")
+        store = VariableStore()
+        store.add_backend(YamlVariableBackend(vars_file))
+        set_variable_store(store)
+        return store
+
+    @pytest.mark.asyncio
+    async def test_process_file(self, templates_dir, store_with_vars):
+        """Test processing a template file."""
+        processor = TemplateProcessor(templates_dir)
+        result = await processor.process_file("simple.j2")
+        
+        assert result == "Simple template content"
+
+    @pytest.mark.asyncio
+    async def test_process_file_with_vars(self, templates_dir, store_with_vars):
+        """Test processing a template file with variables."""
+        processor = TemplateProcessor(templates_dir)
+        result = await processor.process_file("with-vars.j2")
+        
+        assert result == "App: Test App"
+
+    @pytest.mark.asyncio
+    async def test_include_template(self, templates_dir, store_with_vars):
+        """Test including templates."""
+        processor = TemplateProcessor(templates_dir)
+        result = await processor.process(
+            '{% include "simple.j2" %} - inline'
+        )
+        
+        assert result == "Simple template content - inline"
+
+    @pytest.mark.asyncio
+    async def test_include_nested_template(self, templates_dir, store_with_vars):
+        """Test including templates from subdirectories."""
+        processor = TemplateProcessor(templates_dir)
+        result = await processor.process(
+            '{% include "common/header.j2" %}'
+        )
+        
+        assert result == "=== HEADER ==="
+
+    @pytest.mark.asyncio
+    async def test_file_not_found(self, templates_dir, store_with_vars):
+        """Test error handling for missing template file."""
+        processor = TemplateProcessor(templates_dir)
+        
+        with pytest.raises(FileNotFoundError):
+            await processor.process_file("nonexistent.j2")
 
 
 class TestProcessSystemPrompt:
     """Tests for process_system_prompt function."""
 
-    @pytest.mark.asyncio
-    async def test_process_prompt_no_templates(self):
-        """Test processing prompt without templates."""
-        prompt = "You are a helpful assistant."
-        result = await process_system_prompt(prompt)
-        
-        assert result == prompt
-
-    @pytest.mark.asyncio
-    async def test_process_prompt_with_template(self):
-        """Test processing prompt with a template."""
-        prompt = "Current time: {{get_current_time()}}"
-        result = await process_system_prompt(prompt)
-        
-        # Template should be replaced with actual time data
-        assert "{{" not in result
-        assert "time" in result  # Should contain time info
-
-    @pytest.mark.asyncio
-    async def test_process_prompt_preserves_text(self):
-        """Test that non-template text is preserved."""
-        prompt = "Hello! {{calculator(expression='1+1')}} Goodbye!"
-        result = await process_system_prompt(prompt)
-        
-        assert "Hello!" in result
-        assert "Goodbye!" in result
-        assert "{{" not in result
-
-    @pytest.mark.asyncio
-    async def test_process_prompt_multiple_templates(self):
-        """Test processing prompt with multiple templates."""
-        prompt = """
-        Time: {{get_current_time()}}
-        Math: {{calculator(expression="5+5")}}
-        """
-        result = await process_system_prompt(prompt)
-        
-        assert "{{" not in result
-        assert "Time:" in result
-        assert "Math:" in result
+    @pytest.fixture(autouse=True)
+    def setup_empty_store(self):
+        """Set up an empty variable store for each test."""
+        store = VariableStore()
+        set_variable_store(store)
 
     @pytest.mark.asyncio
     async def test_process_prompt_none(self):
@@ -339,69 +329,40 @@ class TestProcessSystemPrompt:
         assert result == ""
 
     @pytest.mark.asyncio
-    async def test_process_prompt_concurrent_templates(self):
-        """Test that multiple templates are processed concurrently."""
-        prompt = "{{calculator(expression='1+1')}} {{calculator(expression='2+2')}}"
-        result = await process_system_prompt(prompt)
-        
-        # Both should be processed
-        assert "{{" not in result
-        # Results should be present (order might vary)
-        assert "2" in result  # Result of 1+1
-        assert "4" in result  # Result of 2+2
-
-
-class TestTemplateEdgeCases:
-    """Tests for edge cases in template processing."""
-
-    def test_nested_braces_not_matched(self):
-        """Test that nested braces don't cause issues."""
-        # This should not match as a template
-        text = "{{not{a}template}}"
-        templates = find_templates(text)
-        
-        # Should not find invalid templates
-        for t in templates:
-            assert t["tool_name"].isidentifier()
-
-    def test_incomplete_template(self):
-        """Test that incomplete templates are not matched."""
-        templates = find_templates("{{incomplete")
-        assert templates == []
-        
-        templates = find_templates("incomplete}}")
-        assert templates == []
+    async def test_process_prompt_plain_text(self):
+        """Test processing plain text prompt."""
+        result = await process_system_prompt("You are a helpful assistant.")
+        assert result == "You are a helpful assistant."
 
     @pytest.mark.asyncio
-    async def test_template_error_handling(self):
-        """Test that template errors don't crash processing."""
-        # Mock a handler that raises an exception
-        with patch("openai_proxy.template_processor.get_handler") as mock_get:
-            mock_handler = AsyncMock()
-            mock_handler.name = "failing_tool"
-            mock_handler.execute.side_effect = Exception("Test error")
-            mock_get.return_value = mock_handler
-            
-            result = await call_tool("failing_tool", {})
-            
-            assert "[Error" in result
-
-    def test_template_with_special_characters_in_string(self):
-        """Test template with special characters in string argument."""
-        templates = find_templates('{{tool(path="/path/to/file")}}')
+    async def test_process_prompt_with_tool(self):
+        """Test processing prompt with tool call."""
+        # Initialize the processor
+        initialize_template_processor(None)
         
-        assert len(templates) == 1
-        assert templates[0]["arguments"]["path"] == "/path/to/file"
-
-    @pytest.mark.asyncio
-    async def test_process_preserves_template_order(self):
-        """Test that template results are in correct positions."""
-        prompt = "A {{calculator(expression='1+1')}} B {{calculator(expression='2+2')}} C"
+        prompt = 'Current time: {{ tool("get_current_time") }}'
         result = await process_system_prompt(prompt)
         
-        # Check order is preserved
-        a_pos = result.index("A")
-        b_pos = result.index("B")
-        c_pos = result.index("C")
+        assert "time" in result
+
+
+class TestGlobalFunctions:
+    """Tests for global template processor functions."""
+
+    def test_get_template_processor_creates_instance(self):
+        """Test that get_template_processor creates an instance."""
+        processor = get_template_processor()
+        assert processor is not None
+        assert isinstance(processor, TemplateProcessor)
+
+    def test_initialize_template_processor(self, tmp_path):
+        """Test initializing template processor with directory."""
+        processor = initialize_template_processor(tmp_path)
         
-        assert a_pos < b_pos < c_pos
+        assert processor.templates_dir == tmp_path
+
+    def test_initialize_template_processor_none(self):
+        """Test initializing template processor without directory."""
+        processor = initialize_template_processor(None)
+        
+        assert processor.templates_dir is None

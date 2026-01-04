@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from openai_proxy.models import (
+    ExpertConfig,
     ModelConfig,
     ModelRegistry,
     Tool,
@@ -123,6 +124,41 @@ class TestTool:
         assert "handler" not in data
 
 
+class TestExpertConfig:
+    """Tests for ExpertConfig schema."""
+
+    def test_default_values(self):
+        """Test default expert config values."""
+        config = ExpertConfig()
+        
+        assert config.history == "full"
+
+    def test_custom_history_full(self):
+        """Test expert with full history mode."""
+        config = ExpertConfig(history="full")
+        assert config.history == "full"
+
+    def test_custom_history_condensed(self):
+        """Test expert with condensed history mode."""
+        config = ExpertConfig(history="condensed")
+        assert config.history == "condensed"
+
+    def test_custom_history_off(self):
+        """Test expert with history off."""
+        config = ExpertConfig(history="off")
+        assert config.history == "off"
+
+    def test_history_false_converts_to_off(self):
+        """Test that False is converted to 'off' (YAML parses 'off' as False)."""
+        config = ExpertConfig(history=False)
+        assert config.history == "off"
+
+    def test_history_true_converts_to_full(self):
+        """Test that True is converted to 'full'."""
+        config = ExpertConfig(history=True)
+        assert config.history == "full"
+
+
 class TestModelConfig:
     """Tests for ModelConfig schema."""
 
@@ -196,6 +232,27 @@ class TestModelConfig:
         
         assert "server1" in config.mcp_servers
         assert config.mcp_servers["server1"]["whitelist"] == ["tool1", "tool2"]
+
+    def test_experts_empty_by_default(self):
+        """Test that experts is empty by default."""
+        config = ModelConfig(name="test")
+        assert config.experts == {}
+
+    def test_experts_configuration(self):
+        """Test experts configuration."""
+        config = ModelConfig(
+            name="router",
+            experts={
+                "augmented/perplexity": ExpertConfig(history="condensed"),
+                "augmented/homeassistant": ExpertConfig(history="full"),
+                "augmented/music": ExpertConfig(history="off"),
+            }
+        )
+        
+        assert len(config.experts) == 3
+        assert config.experts["augmented/perplexity"].history == "condensed"
+        assert config.experts["augmented/homeassistant"].history == "full"
+        assert config.experts["augmented/music"].history == "off"
 
 
 class TestModelRegistry:

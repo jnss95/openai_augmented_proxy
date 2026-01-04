@@ -79,6 +79,18 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
+    def templates_dir(self) -> str:
+        """Directory containing Jinja2 templates."""
+        return str(Path(self.config_dir) / "templates")
+
+    @computed_field
+    @property
+    def variables_file(self) -> str:
+        """Path to the variables.yaml file."""
+        return str(Path(self.config_dir) / "variables.yaml")
+
+    @computed_field
+    @property
     def logs_dir(self) -> str:
         """Directory for log files."""
         return str(Path(self.config_dir) / "logs")

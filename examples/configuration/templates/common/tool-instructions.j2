@@ -1,0 +1,14 @@
+{# Tool usage instructions template #}
+## Available Tools
+
+You have access to the following tools:
+
+{% if tools is defined %}
+{% for tool_def in tools %}
+- **{{ tool_def.function.name }}**: {{ tool_def.function.description | default("No description") }}
+{% endfor %}
+{% else %}
+No tools are currently configured.
+{% endif %}
+
+{{ prompts.tool_guidance | default("") }}

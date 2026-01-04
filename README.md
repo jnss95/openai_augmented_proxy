@@ -9,7 +9,7 @@ A Python proxy server that augments OpenAI-compatible APIs with additional tools
 - **Tool Augmentation**: Add custom tools to augmented model configurations
 - **MCP Server Integration**: Connect to Model Context Protocol servers (stdio, SSE, Streamable HTTP)
 - **Per-Server Tool Filtering**: Whitelist/blacklist tools from each MCP server
-- **System Prompt Templates**: Call tools in system prompts using `{{tool_name(args)}}` syntax
+- **Jinja2 Templates**: Full Jinja2 templating in system prompts with tool calls, includes, and variables
 - **Skills Support**: Claude Code-style skills that inject capabilities into system prompts
 - **Streaming Tool Status**: Real-time status updates during tool execution (similar to "thinking")
 - **Automatic Tool Handling**: Proxy executes its own tools transparently
@@ -166,51 +166,50 @@ mcp_servers:
       - "*test*"
 ```
 
-### System Prompt Templates
+### Jinja2 Templates
 
-You can call tools directly in the system prompt using template syntax. Templates are processed at request time and replaced with the tool's result:
+System prompts support full Jinja2 templating with tool calls, includes, variables, and control flow.
 
 ```yaml
 system_prompt: |
-  You are a helpful assistant.
+  {% include "base-assistant.j2" %}
   
-  The current time is: {{get_current_time(timezone="UTC")}}
+  ## Current Context
   
+  The current time is: {{ tool("get_current_time", timezone="UTC") }}
+  
+  {% if include_devices %}
   Available devices:
-  {{mcp_homeassistant_list_entities(domain="light")}}
+  {{ tool("mcp_homeassistant_list_entities", domain="light") }}
+  {% endif %}
 ```
 
-**Template Syntax:**
-- `{{tool_name()}}` - Call a tool with no arguments
-- `{{tool_name(arg="value")}}` - Call with string argument
-- `{{tool_name(count=10)}}` - Call with integer argument
-- `{{tool_name(enabled=true)}}` - Call with boolean argument
-
-**Supported Value Types:**
-- Strings: `"value"` or `'value'`
-- Integers: `123`
-- Floats: `12.5`
-- Booleans: `true` or `false`
-- Null: `null`
+**Template Features:**
+- `{{ tool("name", arg="value") }}` - Call tools (builtin or MCP)
+- `{% include "template.j2" %}` - Include template files from `templates/` directory
+- `{{ variable }}` - Access variables from `variables.yaml`
+- `{% if %}`, `{% for %}`, filters - Full Jinja2 syntax
 
 **Examples:**
 
 ```yaml
-# Built-in tool
+# Tool calls
 system_prompt: |
-  Current time: {{get_current_time()}}
+  Current time: {{ tool("get_current_time") }}
+  Weather: {{ tool("mcp_weather_get_forecast", city="Berlin") }}
 
-# MCP tool (prefixed with mcp_{server}_)
+# Variables from variables.yaml
 system_prompt: |
-  Weather forecast: {{mcp_weather_get_forecast(city="Berlin")}}
+  Welcome to {{ app_name }}!
+  Max tokens: {{ settings.max_tokens }}
 
-# Multiple templates
+# Conditionals and loops
 system_prompt: |
-  Time: {{get_current_time(timezone="Europe/Berlin")}}
-  Calculator test: {{calculator(expression="2+2")}}
+  {% if debug_mode %}Debug enabled{% endif %}
+  {% for item in items %}* {{ item }}{% endfor %}
 ```
 
-Templates are processed concurrently for better performance.
+Tool calls are executed concurrently for better performance.
 
 ### Skills Configuration
 
@@ -246,6 +245,49 @@ uv run uvicorn openai_proxy.app:app --host 0.0.0.0 --port 8000 --reload
 | `/v1/chat/completions` | POST | Create a chat completion |
 | `/admin/reload` | POST | Reload all configurations |
 | `/health` | GET | Health check |
+
+### Admin API
+
+The proxy exposes admin endpoints for debugging and testing.
+
+#### Template Evaluation
+
+Test Jinja2 templates before using them in model configurations:
+
+```bash
+# Evaluate a simple template
+http POST localhost:8000/admin/template/eval \
+  template='Hello {{ name }}!' \
+  variables:='{"name": "World"}'
+
+# Evaluate a template with tool call
+http POST localhost:8000/admin/template/eval \
+  template='Time: {{ tool("get_current_time", timezone="UTC") }}'
+
+# Get all available variables
+http GET localhost:8000/admin/template/variables
+```
+
+#### MCP Server Management
+
+Browse and inspect MCP servers and their tools:
+
+```bash
+# List all MCP servers
+http GET localhost:8000/admin/mcp/servers
+
+# Get details for a specific server
+http GET localhost:8000/admin/mcp/servers/homeassistant
+
+# List tools for a server
+http GET localhost:8000/admin/mcp/servers/homeassistant/tools
+
+# Get details for a specific tool
+http GET localhost:8000/admin/mcp/servers/homeassistant/tools/HassLightSet
+
+# List all tools from all connected servers
+http GET localhost:8000/admin/mcp/tools
+```
 
 ### Two Operating Modes
 
