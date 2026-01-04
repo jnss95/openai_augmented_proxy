@@ -22,3 +22,4 @@ logs/
 
 # Apple macOS files
 .DS_Store
+.coverage
