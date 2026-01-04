@@ -1,0 +1,121 @@
+# =============================================================================
+# MCP Server Configuration
+# =============================================================================
+# Define Model Context Protocol servers that provide tools to augmented models.
+#
+# Server Types:
+#   - stdio:          Run local command, communicate via stdin/stdout
+#   - sse:            Server-Sent Events over HTTP
+#   - streamablehttp: Streamable HTTP (MCP 2025-06 spec)
+#
+# Environment Variables:
+#   Use ${VAR_NAME} syntax to reference environment variables.
+#   These are expanded at runtime.
+# =============================================================================
+
+servers:
+  # ===========================================================================
+  # Example: Stdio Server (Local Command)
+  # ===========================================================================
+  # Runs a local command and communicates via stdin/stdout.
+  # Great for: npx packages, Python scripts, local tools
+  
+  filesystem:
+    type: stdio
+    description: "File system operations"
+    
+    # Command to run (must be in PATH or absolute path)
+    command: npx
+    
+    # Arguments passed to the command
+    args:
+      - "-y"
+      - "@anthropic/mcp-filesystem"
+      - "/Users/me/allowed-directory"
+    
+    # Environment variables for the subprocess
+    env:
+      NODE_ENV: production
+
+  # ---------------------------------------------------------------------------
+  # Another stdio example: Python-based MCP server
+  # ---------------------------------------------------------------------------
+  
+  # calculator:
+  #   type: stdio
+  #   description: "Mathematical calculations"
+  #   command: python
+  #   args:
+  #     - "-m"
+  #     - "mcp_calculator"
+  #   env:
+  #     PYTHONPATH: "/path/to/mcp/servers"
+
+  # ===========================================================================
+  # Example: Web Search via Perplexity
+  # ===========================================================================
+  
+  web-search:
+    type: stdio
+    description: "Web search via Perplexity AI"
+    command: npx
+    args:
+      - "-y"
+      - "perplexity-mcp"
+    env:
+      # Reference API key from environment
+      PERPLEXITY_API_KEY: "${PERPLEXITY_API_KEY}"
+
+  # ===========================================================================
+  # Example: SSE Server (Server-Sent Events)
+  # ===========================================================================
+  # Connects to an HTTP endpoint using Server-Sent Events.
+  # Great for: Remote servers, cloud-hosted MCP services
+  
+  # remote-tools:
+  #   type: sse
+  #   description: "Remote tool server"
+  #   
+  #   # The SSE endpoint URL
+  #   url: "http://localhost:3001/sse"
+  #   
+  #   # Optional: HTTP headers for authentication
+  #   headers:
+  #     Authorization: "Bearer ${REMOTE_API_KEY}"
+  #     X-Custom-Header: "value"
+
+  # ===========================================================================
+  # Example: Streamable HTTP (Home Assistant)
+  # ===========================================================================
+  # Uses the MCP 2025-06 Streamable HTTP transport.
+  # Required for: Home Assistant MCP, other modern MCP servers
+  
+  # homeassistant:
+  #   type: streamablehttp
+  #   description: "Home Assistant smart home control"
+  #   
+  #   # The MCP endpoint URL
+  #   url: "https://your-homeassistant.com/api/mcp"
+  #   
+  #   # Authentication headers
+  #   headers:
+  #     Authorization: "Bearer ${HA_LONG_LIVED_TOKEN}"
+
+# =============================================================================
+# Tips
+# =============================================================================
+#
+# 1. Test servers individually first:
+#    npx -y @anthropic/mcp-filesystem /tmp
+#
+# 2. Check logs for connection issues:
+#    openai-proxy --debug --config ./conf
+#
+# 3. Tool naming convention:
+#    MCP tools are prefixed: mcp_{server_name}_{tool_name}
+#    Example: mcp_filesystem_read_file
+#
+# 4. Environment variables:
+#    - Set in shell before running proxy
+#    - Or use .env file in working directory
+#    - CLI: PERPLEXITY_API_KEY=xxx openai-proxy

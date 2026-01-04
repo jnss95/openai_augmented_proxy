@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment files
+.env
+my_config
+
+# Cache
+.pytest_cache/
+.ruff_cache/
+
+# Chat logs
+logs/
+
+# Apple macOS files
+.DS_Store

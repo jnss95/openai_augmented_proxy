@@ -1,0 +1,98 @@
+# =============================================================================
+# Example: General Purpose Assistant
+# =============================================================================
+# This configuration creates an augmented model that combines:
+# - A powerful upstream model (GPT-4o)
+# - MCP server tools (filesystem, web search)
+# - Skills (code review, writing style)
+# - Custom system prompt
+# =============================================================================
+
+# The name clients use to access this model
+# Convention: Use 'augmented/' prefix to distinguish from upstream models
+name: augmented/assistant
+
+# The actual model to use for inference
+# Can be any model supported by your upstream API (OpenAI, OpenRouter, etc.)
+upstream_model: gpt-4o
+
+# Optional metadata
+description: "General purpose assistant with tools and skills"
+owned_by: "openai-proxy"
+
+# =============================================================================
+# System Prompt
+# =============================================================================
+# Prepended to all conversations. Skills are appended after this.
+
+system_prompt: |
+  You are a helpful assistant with access to various tools.
+  
+  When using tools:
+  - Prefer using tools over making assumptions
+  - Explain what you're doing before calling tools
+  - Summarize tool results for the user
+  
+  Be concise but thorough in your responses.
+
+# =============================================================================
+# MCP Servers
+# =============================================================================
+# Connect to MCP servers defined in mcp/servers.yaml
+# 
+# Format options:
+#   1. Simple list (all tools enabled):
+#      mcp_servers:
+#        - filesystem
+#        - web-search
+#
+#   2. With filtering (whitelist/blacklist):
+#      mcp_servers:
+#        server_name:
+#          whitelist: ["pattern*"]  # Only allow matching tools
+#          blacklist: ["*debug*"]   # Exclude matching tools
+
+mcp_servers:
+  # Include all tools from filesystem server
+  filesystem: null
+  
+  # Include web-search with filtering
+  web-search:
+    whitelist:
+      - "search_*"
+      - "fetch_*"
+    blacklist:
+      - "*_debug"
+
+# =============================================================================
+# Skills
+# =============================================================================
+# Skills are markdown files in the skills/ directory that get injected into
+# the system prompt. They provide reusable instructions and capabilities.
+
+skills:
+  - code-review
+  - writing-style
+
+# Include global skills from skills/ root directory
+# Set to false to only use model-specific skills
+include_global_skills: true
+
+# =============================================================================
+# Built-in Tools
+# =============================================================================
+# Add custom tools handled by the proxy itself (not MCP servers)
+# These are defined inline and implemented in handlers.py
+
+tools:
+  - type: function
+    function:
+      name: get_current_time
+      description: Get the current date and time in any timezone
+      parameters:
+        type: object
+        properties:
+          timezone:
+            type: string
+            description: "Timezone name (e.g., 'UTC', 'America/New_York', 'Europe/London')"
+        required: []

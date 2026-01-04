@@ -1,0 +1,37 @@
+[project]
+name = "openai-proxy"
+version = "0.1.0"
+description = "OpenAI API Proxy that augments models with additional tools"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.128.0",
+    "httpx>=0.28.1",
+    "mcp>=1.25.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.40.0",
+]
+
+[project.scripts]
+openai-proxy = "openai_proxy.__main__:main"
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openai_proxy"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]

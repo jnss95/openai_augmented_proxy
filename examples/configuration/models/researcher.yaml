@@ -1,0 +1,32 @@
+# =============================================================================
+# Example: Research Assistant
+# =============================================================================
+# A focused model for research tasks with web search capabilities.
+# Demonstrates minimal configuration with specific tool filtering.
+# =============================================================================
+
+name: augmented/researcher
+
+# Use a model good at reasoning and synthesis
+upstream_model: anthropic/claude-sonnet-4
+
+description: "Research assistant with web search"
+
+system_prompt: |
+  You are a research assistant specialized in finding and synthesizing information.
+  
+  Your workflow:
+  1. Understand what information the user needs
+  2. Search for relevant sources using available tools
+  3. Synthesize findings into clear, well-structured responses
+  4. Cite your sources when possible
+  
+  Always verify information from multiple sources when available.
+
+# Only include the search server, with all tools
+mcp_servers:
+  - web-search
+
+# No custom skills - just the system prompt
+skills: []
+include_global_skills: false

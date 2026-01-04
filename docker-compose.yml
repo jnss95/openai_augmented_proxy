@@ -1,0 +1,22 @@
+services:
+  openai-proxy:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount your configuration directory
+      - ./my_config:/config:ro
+      # Optional: Mount logs directory for persistence
+      - ./logs:/app/logs
+    environment:
+      # Required: Your OpenAI API key
+      - API_KEY=${OPENAI_API_KEY}
+      - BASE_URL=${OPENAI_API_BASE_URL:https://api.openai.com/v1}
+      # Optional: Enable debug mode
+      # - OPENAI_PROXY_DEBUG=1
+    restart: unless-stopped
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3

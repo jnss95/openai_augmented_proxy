@@ -1,0 +1,40 @@
+# =============================================================================
+# Example: Home Assistant Controller
+# =============================================================================
+# Controls smart home devices via Home Assistant MCP server.
+# Shows streamablehttp transport and tool filtering for safety.
+# =============================================================================
+
+name: augmented/home-control
+
+# Fast model for quick responses
+upstream_model: gpt-4o-mini
+
+description: "Smart home controller via Home Assistant"
+
+system_prompt: |
+  You are a smart home assistant connected to Home Assistant.
+  
+  Guidelines:
+  - Confirm destructive actions (turning off all lights, etc.)
+  - Provide status updates after making changes
+  - If a device isn't responding, suggest troubleshooting steps
+  - Be concise - users want quick control, not long explanations
+
+# Connect to Home Assistant with safety filtering
+mcp_servers:
+  homeassistant:
+    # Only allow safe operations
+    whitelist:
+      - "HassGetState"
+      - "HassLightSet"
+      - "HassClimateSetTemperature"
+      - "HassSwitchTurnOn"
+      - "HassSwitchTurnOff"
+    # Block anything debug-related
+    blacklist:
+      - "*Debug*"
+      - "*Test*"
+
+skills: []
+include_global_skills: false
